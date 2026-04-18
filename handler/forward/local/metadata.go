@@ -17,6 +17,9 @@ type metadata struct {
 	httpKeepalive bool
 	proxyProtocol int
 
+	rawRecorderRequired bool
+	rawRecorderTimeout  time.Duration
+
 	sniffing                    bool
 	sniffingTimeout             time.Duration
 	sniffingWebsocket           bool
@@ -36,6 +39,8 @@ func (h *forwardHandler) parseMetadata(md mdata.Metadata) (err error) {
 
 	h.md.httpKeepalive = mdutil.GetBool(md, "http.keepalive")
 	h.md.proxyProtocol = mdutil.GetInt(md, "proxyProtocol")
+	h.md.rawRecorderRequired = mdutil.GetBool(md, "rawRecorder.required", "recorder.raw.required")
+	h.md.rawRecorderTimeout = mdutil.GetDuration(md, "rawRecorder.timeout", "recorder.raw.timeout")
 
 	h.md.sniffing = mdutil.GetBool(md, "sniffing")
 	h.md.sniffingTimeout = mdutil.GetDuration(md, "sniffing.timeout")

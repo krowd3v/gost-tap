@@ -88,11 +88,24 @@ func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...hand
 	// Useful for capturing plaintext WHOIS / DNS-over-TCP without having
 	// to rely on protocol-specific sniffing.
 	//
-	// The SID (session id, also reported in the sibling metadata record)
-	// is embedded in every raw record so the receiver can join raw and
-	// metadata records server-side without guessing by timestamp.
+	// The wrapper carries SID + service name from the start. Route (the
+	// proxy-<hash>@ip:port > target string) is set after Router.Dial
+	// below, once the chain has picked a proxy. Records emitted before
+	// that (none in practice, since Pipe hasn't started) would simply
+	// omit the route line.
+	var rawConn *recorderConn
 	if h.rawRecorder.Recorder != nil {
-		conn = newRecorderConn(conn, h.rawRecorder, xctx.SidFromContext(ctx).String())
+		rawConn = &recorderConn{
+			Conn:     conn,
+			recorder: h.rawRecorder,
+			ctx:      ctx,
+			log:      h.options.Logger,
+			required: h.md.rawRecorderRequired,
+			timeout:  h.md.rawRecorderTimeout,
+			sid:      xctx.SidFromContext(ctx).String(),
+			service:  h.options.Service,
+		}
+		conn = rawConn
 	}
 
 	start := time.Now()
@@ -168,6 +181,9 @@ func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...hand
 			var buf bytes.Buffer
 			cc, err := h.options.Router.Dial(ictx.ContextWithBuffer(ctx, &buf), "tcp", address)
 			ro.Route = buf.String()
+			if rawConn != nil {
+				rawConn.SetRoute(ro.Route)
+			}
 
 			cc = proxyproto.WrapClientConn(
 				h.md.proxyProtocol,
@@ -252,6 +268,12 @@ func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...hand
 	var buf bytes.Buffer
 	cc, err := h.options.Router.Dial(ictx.ContextWithBuffer(ctx, &buf), network, addr)
 	ro.Route = buf.String()
+	// Push the resolved route (proxy-<hash>@ip:port > target) into the raw
+	// recorder wrapper so subsequent Read/Write records carry the proxy
+	// identity inline, not just in the meta record.
+	if rawConn != nil {
+		rawConn.SetRoute(ro.Route)
+	}
 	if err != nil {
 		log.Error(err)
 		// TODO: the router itself may be failed due to the failed node in the router,
