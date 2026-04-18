@@ -37,9 +37,10 @@ func init() {
 type forwardHandler struct {
 	hop      hop.Hop
 	md       metadata
-	options  handler.Options
-	recorder recorder.RecorderObject
-	certPool tls_util.CertPool
+	options     handler.Options
+	recorder    recorder.RecorderObject
+	rawRecorder recorder.RecorderObject
+	certPool    tls_util.CertPool
 }
 
 func NewHandler(opts ...handler.Option) handler.Handler {
@@ -59,9 +60,11 @@ func (h *forwardHandler) Init(md md.Metadata) (err error) {
 	}
 
 	for _, ro := range h.options.Recorders {
-		if ro.Record == xrecorder.RecorderServiceHandler {
+		switch ro.Record {
+		case xrecorder.RecorderServiceHandler:
 			h.recorder = ro
-			break
+		case xrecorder.RecorderServiceHandlerRaw:
+			h.rawRecorder = ro
 		}
 	}
 
@@ -79,6 +82,14 @@ func (h *forwardHandler) Forward(hop hop.Hop) {
 
 func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...handler.HandleOption) (err error) {
 	defer conn.Close()
+
+	// Wrap the incoming conn with a byte-mirroring recorder when a raw
+	// recorder is configured. Every Read/Write on conn emits one record.
+	// Useful for capturing plaintext WHOIS / DNS-over-TCP without having
+	// to rely on protocol-specific sniffing.
+	if h.rawRecorder.Recorder != nil {
+		conn = newRecorderConn(conn, h.rawRecorder)
+	}
 
 	start := time.Now()
 
