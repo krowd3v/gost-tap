@@ -15,6 +15,7 @@ type metadata struct {
 	backlog                      int
 	insecure                     bool
 	path                         string
+	maxStreams                   uint32
 	keepalive                    bool
 	keepaliveMinTime             time.Duration
 	keepaliveTime                time.Duration
@@ -32,6 +33,15 @@ func (l *grpcListener) parseMetadata(md mdata.Metadata) (err error) {
 
 	l.md.insecure = mdutil.GetBool(md, "grpc.insecure", "grpcInsecure", "insecure")
 	l.md.path = mdutil.GetString(md, "grpc.path", "path")
+
+	// Optional explicit MaxConcurrentStreams. grpc-go default is math.MaxUint32
+	// (effectively unlimited) but is NOT advertised in SETTINGS, so clients
+	// brief-cap at 100 until their first settings frame arrives. Setting this
+	// explicitly makes the server advertise the value, eliminating that
+	// transient cap for the first ~RTT after a ClientConn is established.
+	if v := mdutil.GetInt(md, "grpc.maxStreams", "maxStreams"); v > 0 {
+		l.md.maxStreams = uint32(v)
+	}
 
 	l.md.keepalive = mdutil.GetBool(md, "grpc.keepalive", "keepalive", "keepAlive")
 	if l.md.keepalive {

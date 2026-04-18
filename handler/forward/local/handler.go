@@ -35,8 +35,8 @@ func init() {
 }
 
 type forwardHandler struct {
-	hop      hop.Hop
-	md       metadata
+	hop         hop.Hop
+	md          metadata
 	options     handler.Options
 	recorder    recorder.RecorderObject
 	rawRecorder recorder.RecorderObject
@@ -87,8 +87,12 @@ func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...hand
 	// recorder is configured. Every Read/Write on conn emits one record.
 	// Useful for capturing plaintext WHOIS / DNS-over-TCP without having
 	// to rely on protocol-specific sniffing.
+	//
+	// The SID (session id, also reported in the sibling metadata record)
+	// is embedded in every raw record so the receiver can join raw and
+	// metadata records server-side without guessing by timestamp.
 	if h.rawRecorder.Recorder != nil {
-		conn = newRecorderConn(conn, h.rawRecorder)
+		conn = newRecorderConn(conn, h.rawRecorder, xctx.SidFromContext(ctx).String())
 	}
 
 	start := time.Now()
