@@ -35,11 +35,12 @@ func init() {
 }
 
 type forwardHandler struct {
-	hop      hop.Hop
-	md       metadata
-	options  handler.Options
-	recorder recorder.RecorderObject
-	certPool tls_util.CertPool
+	hop         hop.Hop
+	md          metadata
+	options     handler.Options
+	recorder    recorder.RecorderObject
+	rawRecorder recorder.RecorderObject
+	certPool    tls_util.CertPool
 }
 
 func NewHandler(opts ...handler.Option) handler.Handler {
@@ -59,9 +60,11 @@ func (h *forwardHandler) Init(md md.Metadata) (err error) {
 	}
 
 	for _, ro := range h.options.Recorders {
-		if ro.Record == xrecorder.RecorderServiceHandler {
+		switch ro.Record {
+		case xrecorder.RecorderServiceHandler:
 			h.recorder = ro
-			break
+		case xrecorder.RecorderServiceHandlerRaw:
+			h.rawRecorder = ro
 		}
 	}
 
@@ -109,6 +112,13 @@ func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...hand
 		"sid":     ro.SID,
 	})
 	log.Infof("%s <> %s", conn.RemoteAddr(), conn.LocalAddr())
+
+	if network == "tcp" && h.rawRecorder.Recorder != nil {
+		conn = &recorderConn{
+			Conn:     conn,
+			recorder: h.rawRecorder,
+		}
+	}
 
 	pStats := xstats.Stats{}
 	conn = stats_wrapper.WrapConn(conn, &pStats)

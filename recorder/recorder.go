@@ -13,6 +13,7 @@ const (
 	RecorderServiceHandler       = "recorder.service.handler"
 	RecorderServiceHandlerSerial = "recorder.service.handler.serial"
 	RecorderServiceHandlerTunnel = "recorder.service.handler.tunnel"
+	RecorderServiceHandlerRaw    = "recorder.service.handler.raw"
 )
 
 type HTTPRequestRecorderObject struct {
