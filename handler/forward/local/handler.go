@@ -83,31 +83,6 @@ func (h *forwardHandler) Forward(hop hop.Hop) {
 func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...handler.HandleOption) (err error) {
 	defer conn.Close()
 
-	// Wrap the incoming conn with a byte-mirroring recorder when a raw
-	// recorder is configured. Every Read/Write on conn emits one record.
-	// Useful for capturing plaintext WHOIS / DNS-over-TCP without having
-	// to rely on protocol-specific sniffing.
-	//
-	// The wrapper carries SID + service name from the start. Route (the
-	// proxy-<hash>@ip:port > target string) is set after Router.Dial
-	// below, once the chain has picked a proxy. Records emitted before
-	// that (none in practice, since Pipe hasn't started) would simply
-	// omit the route line.
-	var rawConn *recorderConn
-	if h.rawRecorder.Recorder != nil {
-		rawConn = &recorderConn{
-			Conn:     conn,
-			recorder: h.rawRecorder,
-			ctx:      ctx,
-			log:      h.options.Logger,
-			required: h.md.rawRecorderRequired,
-			timeout:  h.md.rawRecorderTimeout,
-			sid:      xctx.SidFromContext(ctx).String(),
-			service:  h.options.Service,
-		}
-		conn = rawConn
-	}
-
 	start := time.Now()
 
 	ro := &xrecorder.HandlerRecorderObject{
@@ -137,6 +112,13 @@ func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...hand
 		"sid":     ro.SID,
 	})
 	log.Infof("%s <> %s", conn.RemoteAddr(), conn.LocalAddr())
+
+	if network == "tcp" && h.rawRecorder.Recorder != nil {
+		conn = &recorderConn{
+			Conn:     conn,
+			recorder: h.rawRecorder,
+		}
+	}
 
 	pStats := xstats.Stats{}
 	conn = stats_wrapper.WrapConn(conn, &pStats)
@@ -181,9 +163,6 @@ func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...hand
 			var buf bytes.Buffer
 			cc, err := h.options.Router.Dial(ictx.ContextWithBuffer(ctx, &buf), "tcp", address)
 			ro.Route = buf.String()
-			if rawConn != nil {
-				rawConn.SetRoute(ro.Route)
-			}
 
 			cc = proxyproto.WrapClientConn(
 				h.md.proxyProtocol,
@@ -268,12 +247,6 @@ func (h *forwardHandler) Handle(ctx context.Context, conn net.Conn, opts ...hand
 	var buf bytes.Buffer
 	cc, err := h.options.Router.Dial(ictx.ContextWithBuffer(ctx, &buf), network, addr)
 	ro.Route = buf.String()
-	// Push the resolved route (proxy-<hash>@ip:port > target) into the raw
-	// recorder wrapper so subsequent Read/Write records carry the proxy
-	// identity inline, not just in the meta record.
-	if rawConn != nil {
-		rawConn.SetRoute(ro.Route)
-	}
 	if err != nil {
 		log.Error(err)
 		// TODO: the router itself may be failed due to the failed node in the router,

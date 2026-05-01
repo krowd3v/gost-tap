@@ -3,8 +3,6 @@ package grpc
 import (
 	"context"
 	"net"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/go-gost/core/limiter"
@@ -55,33 +53,16 @@ func (l *grpcListener) Init(md md.Metadata) (err error) {
 		return
 	}
 
-	// Support unix-domain-socket gRPC listeners by detecting either a
-	// `unix://` prefix or a leading `/` or `./` (path form). Otherwise fall
-	// back to TCP, preserving existing behavior.
 	network := "tcp"
-	addr := l.options.Addr
-	switch {
-	case strings.HasPrefix(addr, "unix://"):
-		network = "unix"
-		addr = strings.TrimPrefix(addr, "unix://")
-	case strings.HasPrefix(addr, "/") || strings.HasPrefix(addr, "./"):
-		network = "unix"
-	case xnet.IsIPv4(addr):
+	if xnet.IsIPv4(l.options.Addr) {
 		network = "tcp4"
 	}
-
-	// Unix sockets fail to bind if a stale file exists. Remove defensively,
-	// mirroring net/listen_unix behavior in other GOST listeners.
-	if network == "unix" {
-		_ = os.Remove(addr)
-	}
-
 	lc := net.ListenConfig{}
-	if l.md.mptcp && strings.HasPrefix(network, "tcp") {
+	if l.md.mptcp {
 		lc.SetMultipathTCP(true)
 		l.logger.Debugf("mptcp enabled: %v", lc.MultipathTCP())
 	}
-	ln, err := lc.Listen(context.Background(), network, addr)
+	ln, err := lc.Listen(context.Background(), network, l.options.Addr)
 	if err != nil {
 		return
 	}
@@ -96,9 +77,6 @@ func (l *grpcListener) Init(md md.Metadata) (err error) {
 	var opts []grpc.ServerOption
 	if !l.md.insecure {
 		opts = append(opts, grpc.Creds(credentials.NewTLS(l.options.TLSConfig)))
-	}
-	if l.md.maxStreams > 0 {
-		opts = append(opts, grpc.MaxConcurrentStreams(l.md.maxStreams))
 	}
 	if l.md.keepalive {
 		opts = append(opts,

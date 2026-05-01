@@ -13,12 +13,7 @@ const (
 	RecorderServiceHandler       = "recorder.service.handler"
 	RecorderServiceHandlerSerial = "recorder.service.handler.serial"
 	RecorderServiceHandlerTunnel = "recorder.service.handler.tunnel"
-	// RecorderServiceHandlerRaw mirrors every Read/Write on the handler's
-	// incoming conn to the recorder as separate events (one per I/O call).
-	// Enable by adding a recorder entry with Record: this const to a TCP
-	// forward service; combine with Direction / Hexdump / TimestampFormat
-	// options for formatting.
-	RecorderServiceHandlerRaw = "recorder.service.handler.raw"
+	RecorderServiceHandlerRaw    = "recorder.service.handler.raw"
 )
 
 type HTTPRequestRecorderObject struct {

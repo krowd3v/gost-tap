@@ -9,53 +9,73 @@ import (
 	"github.com/go-gost/core/recorder"
 )
 
-type failingRecorder struct{}
-
-func (failingRecorder) Record(context.Context, []byte, ...recorder.RecordOption) error {
-	return errors.New("sink down")
+type captureRecorder struct {
+	records [][]byte
+	err     error
 }
 
-func TestRecorderConnRequiredRecordFailureStopsWrite(t *testing.T) {
+func (r *captureRecorder) Record(_ context.Context, b []byte, _ ...recorder.RecordOption) error {
+	r.records = append(r.records, append([]byte(nil), b...))
+	return r.err
+}
+
+func TestRecorderConnRecordsPayload(t *testing.T) {
 	client, upstream := net.Pipe()
 	defer client.Close()
 	defer upstream.Close()
 
+	rec := &captureRecorder{}
 	conn := &recorderConn{
 		Conn: client,
 		recorder: recorder.RecorderObject{
-			Recorder: failingRecorder{},
+			Recorder: rec,
+			Options:  &recorder.Options{Direction: true},
 		},
-		required: true,
-	}
-
-	if _, err := conn.Write([]byte("response")); err == nil {
-		t.Fatal("Write error = nil, want raw recorder failure")
-	}
-}
-
-func TestRecorderConnRequiredRecordFailureStopsAfterRead(t *testing.T) {
-	client, upstream := net.Pipe()
-	defer client.Close()
-	defer upstream.Close()
-
-	conn := &recorderConn{
-		Conn: client,
-		recorder: recorder.RecorderObject{
-			Recorder: failingRecorder{},
-		},
-		required: true,
 	}
 
 	go func() {
-		_, _ = upstream.Write([]byte("request"))
+		buf := make([]byte, 7)
+		_, _ = upstream.Read(buf)
+		_, _ = upstream.Write([]byte("reply"))
 	}()
 
-	buf := make([]byte, 7)
-	n, err := conn.Read(buf)
-	if err == nil {
-		t.Fatal("Read error = nil, want raw recorder failure")
+	if _, err := conn.Write([]byte("payload")); err != nil {
+		t.Fatal(err)
 	}
-	if n != 7 {
-		t.Fatalf("Read n = %d, want 7", n)
+	buf := make([]byte, 5)
+	if _, err := conn.Read(buf); err != nil {
+		t.Fatal(err)
 	}
+
+	if got := string(rec.records[0]); got != "<\npayload" {
+		t.Fatalf("write record = %q, want %q", got, "<\npayload")
+	}
+	if got := string(rec.records[1]); got != ">\nreply" {
+		t.Fatalf("read record = %q, want %q", got, ">\nreply")
+	}
+}
+
+func TestRecorderConnRecordFailureDoesNotStopWrite(t *testing.T) {
+	client, upstream := net.Pipe()
+	defer client.Close()
+	defer upstream.Close()
+
+	conn := &recorderConn{
+		Conn: client,
+		recorder: recorder.RecorderObject{
+			Recorder: &captureRecorder{err: errors.New("sink down")},
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 7)
+		_, _ = upstream.Read(buf)
+	}()
+
+	if _, err := conn.Write([]byte("payload")); err != nil {
+		t.Fatal(err)
+	}
+	<-done
 }
